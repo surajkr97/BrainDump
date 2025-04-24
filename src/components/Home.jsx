@@ -1,6 +1,7 @@
 import React, { useState } from "react";
 import { useDispatch } from "react-redux";
 import { useSearchParams } from "react-router-dom";
+import { addToNotes, updateToNotes } from "../redux/noteSlice";
 
 const Home = () => {
   const [title, setTitle] = useState("");
