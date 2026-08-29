@@ -7,3 +7,7 @@ node_modules/
 .next/
 .DS_Store
 staticfiles/
+.agents
+.claude
+skills-lock.json
+.neon
