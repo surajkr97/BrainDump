@@ -82,6 +82,26 @@ Admin is at /admin/ if you make a superuser. That's a normal Django user, nothin
 to do with Auth0 - the auth class returns `None` when there's no Bearer header so
 session login still works next to it.
 
+## Running it with Docker
+
+If you'd rather not install Python and Node locally:
+
+```bash
+cp backend/.env.example backend/.env
+cp frontend/.env.example frontend/.env.local
+docker compose up
+```
+
+Fill in the Auth0 values in both files first - Docker doesn't remove that step,
+you still need your own tenant.
+
+That brings up three containers: Postgres, Django on 8000, and Next on 3000.
+The backend runs migrations on startup, so the database is ready on first boot.
+Compose points Django at the local Postgres instead of Neon and sets
+`DJANGO_API_URL=http://backend:8000/api` so the two talk over the compose
+network. It runs with `DEBUG=True` - it's a local dev stack, not a production
+image.
+
 ## Tests
 
 ```bash

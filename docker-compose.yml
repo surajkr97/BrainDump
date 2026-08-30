@@ -1,0 +1,41 @@
+services:
+  db:
+    image: postgres:18-alpine
+    environment:
+      POSTGRES_USER: braindump
+      POSTGRES_PASSWORD: braindump
+      POSTGRES_DB: braindump
+    volumes:
+      - pgdata:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U braindump"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  backend:
+    build: ./backend
+    env_file: ./backend/.env
+    environment:
+      DEBUG: "True"
+      DATABASE_URL_UNPOOLED: postgresql://braindump:braindump@db:5432/braindump
+      ALLOWED_HOSTS: localhost,127.0.0.1,backend
+    depends_on:
+      db:
+        condition: service_healthy
+    ports:
+      - "8000:8000"
+
+  frontend:
+    build: ./frontend
+    env_file: ./frontend/.env.local
+    environment:
+      DJANGO_API_URL: http://backend:8000/api
+      APP_BASE_URL: http://localhost:3000
+    depends_on:
+      - backend
+    ports:
+      - "3000:3000"
+
+volumes:
+  pgdata:

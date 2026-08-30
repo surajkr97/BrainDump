@@ -1,0 +1,8 @@
+.venv/
+__pycache__/
+*.pyc
+db.sqlite3
+staticfiles/
+.env
+.auth0-mcp-state.json
+.auth0-mcp-writes.log
