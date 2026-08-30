@@ -1,61 +1,38 @@
 # BrainDump
 
-Todo app. Django REST API on one side, Next.js on the other, Auth0 doing the login.
+Todo app. Django REST API, Next.js frontend, Auth0 for login.
 
-Every todo belongs to one account. The backend is what makes sure you only ever
-see your own - not the frontend.
+Live: https://brain-dump-ivory-two.vercel.app
 
-Stack: Next.js 16 (App Router, TypeScript, Tailwind), Django 5.2 + DRF, SQLite, Auth0.
+Every todo belongs to one account. The backend enforces that, not the frontend.
 
-## The important part
+Stack: Next.js 16 (App Router, TypeScript, Tailwind), Django 5.2 + DRF, Postgres
+on Neon, Auth0. Deployed on Vercel and Render.
 
-All of it goes through one method in `todos/views.py`:
+## How ownership works
+
+One method in `todos/views.py`:
 
 ```python
 def get_queryset(self):
     return Todo.objects.filter(account=self.request.user)
 ```
 
-`ModelViewSet` runs every action through that, so list, retrieve, update and
-delete are all scoped already. Ask for a todo that isn't yours and you get a
-404, not a 403. A 403 would be admitting the row exists.
+`ModelViewSet` routes every action through it, so list, retrieve, update and
+delete are all scoped. Another account's todo returns 404, not 403 — a 403 would
+confirm the row exists.
 
-On create, `perform_create` sets the owner from the token. And `account` isn't
-in the serializer fields at all, so posting one does nothing.
+`perform_create` sets the owner from the token, and `account` isn't in the
+serializer fields, so sending one does nothing.
 
-`request.user` is an `Account`, found by the `sub` claim on a verified token.
-The frontend never sends a user id and the backend wouldn't trust it anyway.
+`request.user` is an `Account`, found by the `sub` claim on a verified Auth0 JWT.
+The frontend never sends a user id.
 
-## Auth0 setup
+The browser never sees the access token either. It calls same-origin
+`/api/todos`; the Next route handler reads the token from the session cookie
+server-side and forwards it to Django.
 
-You need one API and one application.
-
-**API** (Applications > APIs > Create API)
-
-    Name        BrainDump API
-    Identifier  https://braindump-api
-    Algorithm   RS256
-
-The identifier is just a string, it doesn't have to resolve, but it has to match
-`AUTH0_AUDIENCE` in both env files exactly. RS256 because Django checks the
-signature against Auth0's public keys. Then in that API's Settings turn on
-**Allow Offline Access**, the frontend asks for `offline_access`.
-
-**Application** (Regular Web Application)
-
-    Allowed Callback URLs   http://localhost:3000/auth/callback
-    Allowed Logout URLs     http://localhost:3000
-
-Note the path is `/auth/callback` and not `/callback` - that's where
-`@auth0/nextjs-auth0` v4 puts it. And port 3000, the Next server. Django on 8000
-is never part of the browser login.
-
-**Then authorize the app for the API.** Back on the API, Application Access tab,
-turn on User-delegated Access for your application. Miss this one and login dies
-with "Client is not authorized to access resource server", which is not an
-obvious message. Client Access is the machine-to-machine one, you don't need it.
-
-## Running it
+## Setup
 
 ```bash
 cd backend
@@ -73,34 +50,28 @@ cp .env.example .env.local
 npm run dev
 ```
 
-Fill in both env files before starting. `AUTH0_SECRET` wants 32 bytes,
-`openssl rand -hex 32`. Everything else is in the example files.
+Or `docker compose up` from the root — that runs both plus a local Postgres.
 
-Then http://localhost:3000.
+Fill in both env files first. `AUTH0_SECRET` needs 32 bytes, use
+`openssl rand -hex 32`.
 
-Admin is at /admin/ if you make a superuser. That's a normal Django user, nothing
-to do with Auth0 - the auth class returns `None` when there's no Bearer header so
-session login still works next to it.
+## Auth0 setup
 
-## Running it with Docker
+You need one API and one application.
 
-If you'd rather not install Python and Node locally:
+API: identifier `https://braindump-api`, signing algorithm RS256, Allow Offline
+Access on. The identifier has to match `AUTH0_AUDIENCE` in both env files.
 
-```bash
-cp backend/.env.example backend/.env
-cp frontend/.env.example frontend/.env.local
-docker compose up
-```
+Application: Regular Web App.
 
-Fill in the Auth0 values in both files first - Docker doesn't remove that step,
-you still need your own tenant.
+    Allowed Callback URLs   http://localhost:3000/auth/callback
+    Allowed Logout URLs     http://localhost:3000
 
-That brings up three containers: Postgres, Django on 8000, and Next on 3000.
-The backend runs migrations on startup, so the database is ready on first boot.
-Compose points Django at the local Postgres instead of Neon and sets
-`DJANGO_API_URL=http://backend:8000/api` so the two talk over the compose
-network. It runs with `DEBUG=True` - it's a local dev stack, not a production
-image.
+The path is `/auth/callback`, not `/callback`, and port 3000 not 8000.
+
+Then on the API, open the Application Access tab and turn on User-delegated
+Access for the application. Miss it and login fails with "Client is not
+authorized to access resource server".
 
 ## Tests
 
@@ -109,41 +80,31 @@ cd backend  && .venv/bin/python manage.py test   # 5
 cd frontend && npm test                          # 16
 ```
 
-The backend ones are the ones that matter. Two accounts, and it checks that
-Alice can't read or delete Bob's todo, that the list only ever returns your own,
-that a client-supplied `account` on create gets ignored, and that anonymous
-requests are 401.
+The backend ones are the point. Two accounts, and it checks that Alice can't read
+or delete Bob's todo, that the list only returns your own, that a client-supplied
+`account` on create is ignored, and that anonymous requests get 401.
 
 ## Layout
 
-Backend is a normal Django app - models, serializer, viewset, and an
-authentication class that verifies the JWT.
+    backend/todos/          models, serializer, viewset, JWT auth class
+    frontend/app/           routes
+    frontend/components/    atoms / molecules / organisms
+    frontend/hooks/         useTodos, all state and API calls
+    frontend/lib/           fetch wrapper, Auth0 client, Django forwarder
 
-Frontend is atomic design:
-
-    app/           routes only
-    components/    atoms / molecules / organisms
-    hooks/         useTodos - all the state and API calls live here
-    lib/           fetch wrapper, Auth0 client, the Django forwarder
-    types/
-
-Components don't call the API. `useTodos` owns that and hands back plain
-functions, so `TodoList` only decides what to draw.
+Components don't call the API. `useTodos` does and hands back plain functions.
 
 ## Decisions
 
-**Browser never sees the access token.** The assignment's example env has a
-public `NEXT_PUBLIC_API_URL`, which means the browser calling Django directly
-with the token in JS. I put Next route handlers in between instead - token stays
-in an httpOnly cookie, server reads it and forwards. One more hop locally, but
-nothing can read the token out of the browser.
+The brief's example env has a public `NEXT_PUBLIC_API_URL`, which means the
+browser calling Django directly with the token in JS. I proxied through Next
+route handlers instead, so the token stays in an httpOnly cookie. One extra hop,
+but nothing can read the token out of the browser.
 
-**404 instead of 403** for other people's todos, so IDs don't leak.
+404 rather than 403 for other people's todos, so IDs don't leak.
 
-**Pagination is offset based**, 20 a page. Adding a todo while you're paging can
-shift rows. Cursor pagination fixes that but it's more than this needs.
+Pagination is offset based, 20 a page, so adding a todo while paging can shift
+rows.
 
-**Feedback on writes** is the list updating and the buttons disabling while a
-request is out. No toasts.
-
-Not done: filter by active/completed, search, Docker, deployment.
+The Render free tier sleeps when idle. The page loads straight away but the todo
+list can take up to a minute on the first request.
